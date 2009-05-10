@@ -1,6 +1,8 @@
 package org.singingwizard.raycasting.engine
 
 import java.awt.image.BufferedImage
+import java.awt.Graphics2D
+import java.awt.BasicStroke
 //import java._
 
 object RayCaster {
@@ -51,7 +53,7 @@ object RayCaster {
     private[this] def castRay(xPos:Int, yPos:Int, xStep:Int, yStep:Int) : (Double, Texture) = {
       def castRayInternal(xPos:Int, yPos:Int) : (Int, Int, Texture) = {
         val (xCell, yCell) = (xPos/level.cellSize, yPos/level.cellSize)
-        println( xPos + ", " + yPos )
+        println( xPos + ", " + yPos + " " + (xCell, yCell) )
         if( xCell >= level.widthCells || xCell < 0 || yCell >= level.heightCells || yCell < 0 ) {
         	(xPos, yPos, level.wallTexture)
         } else if(level(xCell, yCell).isDefined) {
@@ -65,41 +67,67 @@ object RayCaster {
     }
     
     def render(pos : Position, angle : Double) : BufferedImage = {
+      /*
+       * Theta = 0 straight down, angle increases counter clockwise
+       * Y increases down
+       * X increases right
+       */
+      
       println( pos + " angle " + toDegrees(angle) )
         
       val columns = for( colNum <- (-outWidth/2) until (outWidth/2) ) yield {
-        val rayAngle = normalizeAngle(angle + (fov/outWidth * colNum))
+        val angleOffCenter = fov/outWidth * colNum
+        val rayAngle = normalizeAngle(angle + angleOffCenter)
         val xDirection = if( rayAngle > 0 ) 1 else if(rayAngle < 0) -1 else 0
-        val yDirection = if( abs(rayAngle) > PI/2 ) 1 else if(abs(rayAngle) < PI/2) -1 else 0
+        val yDirection = if( abs(rayAngle) > PI/2 ) -1 else if(abs(rayAngle) < PI/2) 1 else 0
         
         val Position(xPos, yPos) = pos
         
         println( pos + " angle " + toDegrees(rayAngle) + " Directions " + xDirection + ", " + yDirection )
         
-        val xRayXStep : Int = level.cellSize*xDirection
-        val xRayYStep : Int = (tan(rayAngle) * level.cellSize).toInt
-        val initialStepRatio = try { xDirection match {
-          case -1 => level.cellSize / (xPos - (((xPos:Double) / level.cellSize) * level.cellSize))
-          case 0 => 0.0
-          case 1 => level.cellSize / (xPos - (((xPos:Double) / level.cellSize + 1) * level.cellSize))
-        } } catch { case e : java.lang.ArithmeticException => 0.0 }
-        println("xStep " + xRayXStep + " yStep " + xRayYStep + " initialStepRatio " + initialStepRatio)
-        val (xRayDist, xRayTex) = castRay(xPos + (xRayXStep * initialStepRatio).toInt, yPos + (xRayYStep * initialStepRatio).toInt, xRayXStep, xRayYStep)
+        // Cast ray that hits virticle walls
+        val vRayXStep : Int = level.cellSize*xDirection
+        val vRayYStep : Int = (level.cellSize / tan(rayAngle)).toInt
+        val vRayXPos:Int = xDirection match {
+          case -1 => ((xPos / level.cellSize) * level.cellSize) - 1
+          case 0 => 0
+          case 1 => ((xPos / level.cellSize) * level.cellSize) + 64
+        }
+        val vRayYPos:Int = yPos + ( abs(xPos - vRayXPos) / tan(rayAngle) ).toInt * yDirection
+        println("V xStep " + vRayXStep + " yStep " + vRayYStep + " x " + vRayXPos + " y " + vRayYPos)
+        val (vRayDist, vRayTex) = castRay(vRayXPos, vRayYPos, vRayXStep, vRayYStep)
 
-        /*val yRayXStep = (tan(rayAngle) * level.cellSize).asInstanceOf[Int]
-        val yRayYStep = level.cellSize*yDirection
-        val (yRayDist, yRayTex) = castRay(0, 0, yRayXStep, yRayYStep)*/
-        val ret = (xRayDist, xRayTex)
+        // Cast ray that hits horiz. walls
+        val hRayXStep : Int = (tan(rayAngle) * level.cellSize).toInt
+        val hRayYStep : Int = level.cellSize * yDirection
+        val hRayYPos:Int = xDirection match {
+          case -1 => ((xPos / level.cellSize) * level.cellSize) - 1
+          case 0 => 0
+          case 1 => ((xPos / level.cellSize) * level.cellSize) + 64
+        }
+        val hRayXPos:Int = xPos + ( abs(yPos - hRayYPos) * tan(rayAngle) ).toInt * xDirection 
+        println("H xStep " + hRayXStep + " yStep " + hRayYStep + " x " + hRayXPos + " y " + hRayYPos)
+        val (hRayDist, hRayTex) = castRay(hRayXPos, hRayYPos, hRayXStep, hRayYStep)
+
+        val ret = if( hRayDist < vRayDist ) (hRayDist*cos(angleOffCenter), hRayTex) else (vRayDist*cos(angleOffCenter), vRayTex)
         println(ret)
         ret
       }
       
-      println(columns)
-      
-      val img = new BufferedImage(outWidth, outHeight, BufferedImage.TYPE_4BYTE_ABGR)
-      val g = img.getGraphics
+      val img = new BufferedImage(outWidth, outHeight, BufferedImage.TYPE_INT_RGB)
+      val g = img.getGraphics.asInstanceOf[Graphics2D]
       g.setColor(java.awt.Color.BLACK)
       g.fillRect(0, 0, outWidth, outHeight)
+      g.setStroke(new BasicStroke())
+      for( ((dist, tex), i) <- columns.toList.zipWithIndex ) {
+        val l = (10000.0/dist).toInt
+        tex match {
+          case Color(r,gr,b) => g.setColor(new java.awt.Color(r.toFloat,gr.toFloat,b.toFloat, 1.0f))
+          case _ => g.setColor(java.awt.Color.WHITE)
+        }
+        println(l + " " + ((dist, tex), i) + " " + g.getColor + " " + (outHeight/2 - l/2, outHeight/2 + l/2))
+        g.drawLine(i, outHeight/2 - l/2, i, outHeight/2 + l/2)
+      }
       img
     }
     
