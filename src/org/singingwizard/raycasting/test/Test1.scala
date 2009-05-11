@@ -13,9 +13,9 @@ object Test1 {
 	println(b(0,0))
  
 	val l = new Level(b)
-	val r = new Renderer(l, Math.toRadians(60), 800, 600)
+	val r = new Renderer(l, Math.toRadians(60), 277, 800, 600)
 	
-	val img = r.render(Position(130, 130), Math.PI*(3/4.0))
+	val img = r.render(Position(130, 130), Math.toRadians(160))
 
 	ImageIO.getWriterFormatNames.foreach( println _ )
  

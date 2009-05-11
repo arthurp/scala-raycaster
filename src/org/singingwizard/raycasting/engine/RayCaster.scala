@@ -47,24 +47,31 @@ object RayCaster {
   
   case class Position( x:Int, y:Int )
   
-  class Renderer(val level : Level, val fov:Double, val outWidth:Int, val outHeight:Int) {
+  case class RayInfo(angle : Double, vPositions : List[Position], hPositions : List[Position])
+  case class DebugInfo(position : Position, angle : Double, rays : List[RayInfo])
+  
+  class Renderer(val level : Level, val fov:Double, val projectionPlaneDistance :Int, val outWidth:Int, val outHeight:Int) {
     import java.lang.Math._
       
-    private[this] def castRay(xPos:Int, yPos:Int, xStep:Int, yStep:Int) : (Double, Texture) = {
-      def castRayInternal(xPos:Int, yPos:Int) : (Int, Int, Texture) = {
+    private[this] def castRay(xPos:Int, yPos:Int, xStep:Int, yStep:Int) : (Double, Texture, List[Position]) = {
+      def castRayInternal(xPos:Int, yPos:Int, positions: List[Position]) : (Int, Int, Texture, List[Position]) = {
         val (xCell, yCell) = (xPos/level.cellSize, yPos/level.cellSize)
         println( xPos + ", " + yPos + " " + (xCell, yCell) )
         if( xCell >= level.widthCells || xCell < 0 || yCell >= level.heightCells || yCell < 0 ) {
-        	(xPos, yPos, level.wallTexture)
+        	(xPos, yPos, level.wallTexture, positions)
         } else if(level(xCell, yCell).isDefined) {
-        	(xPos, yPos, level(xCell, yCell).get)
+        	(xPos, yPos, level(xCell, yCell).get, positions)
         } else {
-        	castRayInternal(xPos + xStep, yPos + yStep)
+        	castRayInternal(xPos + xStep, yPos + yStep, Position(xPos, yPos) :: positions)
         }
       }
-      val (finalXPos, finalYPos, tex) = castRayInternal(xPos, yPos)
-      (hypot(finalXPos-xPos,finalYPos-yStep), tex)
+      val (finalXPos, finalYPos, tex, poses) = castRayInternal(xPos, yPos, List())
+      (hypot(finalXPos-xPos,finalYPos-yStep), tex, poses)
     }
+    
+    private[this] var lastDebugInfo : DebugInfo = null
+    
+    def debugInfo : DebugInfo = lastDebugInfo
     
     def render(pos : Position, angle : Double) : BufferedImage = {
       /*
@@ -95,32 +102,33 @@ object RayCaster {
         }
         val vRayYPos:Int = yPos + ( abs(xPos - vRayXPos) / tan(rayAngle) ).toInt * yDirection
         println("V xStep " + vRayXStep + " yStep " + vRayYStep + " x " + vRayXPos + " y " + vRayYPos)
-        val (vRayDist, vRayTex) = castRay(vRayXPos, vRayYPos, vRayXStep, vRayYStep)
+        val (vRayDist, vRayTex, vPoses) = castRay(vRayXPos, vRayYPos, vRayXStep, vRayYStep)
 
         // Cast ray that hits horiz. walls
         val hRayXStep : Int = (tan(rayAngle) * level.cellSize).toInt
         val hRayYStep : Int = level.cellSize * yDirection
-        val hRayYPos:Int = xDirection match {
+        val hRayYPos:Int = yDirection match {
           case -1 => ((xPos / level.cellSize) * level.cellSize) - 1
           case 0 => 0
           case 1 => ((xPos / level.cellSize) * level.cellSize) + 64
         }
         val hRayXPos:Int = xPos + ( abs(yPos - hRayYPos) * tan(rayAngle) ).toInt * xDirection 
         println("H xStep " + hRayXStep + " yStep " + hRayYStep + " x " + hRayXPos + " y " + hRayYPos)
-        val (hRayDist, hRayTex) = castRay(hRayXPos, hRayYPos, hRayXStep, hRayYStep)
+        val (hRayDist, hRayTex, hPoses) = castRay(hRayXPos, hRayYPos, hRayXStep, hRayYStep)
 
         val ret = if( hRayDist < vRayDist ) (hRayDist*cos(angleOffCenter), hRayTex) else (vRayDist*cos(angleOffCenter), vRayTex)
-        println(ret)
-        ret
+        (ret._1, ret._2, RayInfo(rayAngle, vPoses, hPoses))
       }
+      
+      lastDebugInfo = DebugInfo(pos, angle, (for( (_, _, ray)<- columns ) yield ray).toList)
       
       val img = new BufferedImage(outWidth, outHeight, BufferedImage.TYPE_INT_RGB)
       val g = img.getGraphics.asInstanceOf[Graphics2D]
       g.setColor(java.awt.Color.BLACK)
       g.fillRect(0, 0, outWidth, outHeight)
       g.setStroke(new BasicStroke())
-      for( ((dist, tex), i) <- columns.toList.zipWithIndex ) {
-        val l = (10000.0/dist).toInt
+      for( ((dist, tex, _), i) <- columns.toList.zipWithIndex ) {
+        val l = (level.cellSize.toDouble/dist * projectionPlaneDistance).toInt
         tex match {
           case Color(r,gr,b) => g.setColor(new java.awt.Color(r.toFloat,gr.toFloat,b.toFloat, 1.0f))
           case _ => g.setColor(java.awt.Color.WHITE)
