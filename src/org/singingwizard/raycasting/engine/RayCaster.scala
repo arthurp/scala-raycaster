@@ -133,7 +133,7 @@ object RayCaster {
           case Color(r,gr,b) => g.setColor(new java.awt.Color(r.toFloat,gr.toFloat,b.toFloat, 1.0f))
           case _ => g.setColor(java.awt.Color.WHITE)
         }
-        println(l + " " + ((dist, tex), i) + " " + g.getColor + " " + (outHeight/2 - l/2, outHeight/2 + l/2))
+        //println(l + " " + ((dist, tex), i) + " " + g.getColor + " " + (outHeight/2 - l/2, outHeight/2 + l/2))
         g.drawLine(i, outHeight/2 - l/2, i, outHeight/2 + l/2)
       }
       img

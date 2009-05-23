@@ -70,7 +70,10 @@ object SwingTest extends SimpleGUIApplication {
           val info = infoFut()
           
           g2.setColor(AWTColor.RED)
-          g2.drawOval(info.position.x, info.position.y, 5, 5)
+       	  val Position(x, y) = info.position
+       	  g2.drawOval(x, y, 5, 5)
+          import Math.{cos, sin}
+       	  g2.drawLine(x+3, y+2, (x+3 + cos(info.angle)*30).toInt, (y+2 + sin(info.angle)*30).toInt)
           for( RayInfo(_, hPoses, vPoses) <- info.rays ) {
         	g2.setColor(AWTColor.YELLOW)
             drawPoints(hPoses)
@@ -102,7 +105,7 @@ object SwingTest extends SimpleGUIApplication {
     var angle = 0.0
     var renderer = r
     var image : Image = renderer.render(pos, angle)
-    loop {reactWithin(1000) {
+    loop {reactWithin(500) {
       case SetPosition(_pos, _angle) => pos = _pos; angle = _angle; image = renderer.render(pos, angle)
       case GetImage => reply(image)
       case GetDebugInfo => reply(renderer.debugInfo)
