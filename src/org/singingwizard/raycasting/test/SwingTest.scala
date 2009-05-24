@@ -134,9 +134,16 @@ object SwingTest extends SimpleGUIApplication {
 	b(9,4) = G
 	b(3,3) = B
 	b(4,3) = B
+	b(5,4) = G
 	b(4,5) = R
 	b(3,5) = R
 	b(2,5) = R
+	b(8,2) = R
+	b(8,3) = R
+	b(8,2) = R
+	b(9,9) = C
+	b(8,8) = C
+	b(7,7) = C
 	println(b(0,0))
  
  

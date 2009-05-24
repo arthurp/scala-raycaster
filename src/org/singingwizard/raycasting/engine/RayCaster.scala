@@ -6,8 +6,12 @@ import java.awt.BasicStroke
 //import java._
 
 object RayCaster {
-  abstract class Texture extends NotNull
-  case class Color(red:Double, green:Double, blue:Double) extends Texture
+  abstract class Texture extends NotNull {
+    def shade(amount:Double) : Texture 
+  }
+  case class Color(red:Double, green:Double, blue:Double) extends Texture {
+    def shade(a:Double) = Color(red*a,green*a,blue*a)
+  }
   
   class LevelBuilder(val width : Int, val height : Int) {
     private[engine] val data = new Array[Option[Texture]](width * height)
@@ -74,17 +78,21 @@ object RayCaster {
   
   class Renderer(val level : Level, val fov:Double, val projectionPlaneDistance :Int, val outWidth:Int, val outHeight:Int) {
     import java.lang.Math._
-      
-    private[this] def castRay(xPos:Int, yPos:Int, xStep:Int, yStep:Int) : (Int, Int, Texture, List[Position]) = {
-      def castRayInternal(xPos:Int, yPos:Int, positions: List[Position]) : (Int, Int, Texture, List[Position]) = {
-        val (xCell, yCell) = (floor(xPos.toFloat/level.cellSize).toInt, floor(yPos.toFloat/level.cellSize).toInt)
+    
+    private[this] def roundToNearest(v:Double) : Int = {
+      floor(v+1).toInt
+    }
+    
+    private[this] def castRay(xPos:Double, yPos:Double, xStep:Double, yStep:Double) : (Double, Double, Texture, List[Position]) = {
+      def castRayInternal(xPos:Double, yPos:Double, positions: List[Position]) : (Double, Double, Texture, List[Position]) = {
+        val (xCell, yCell) = (floor(floor(xPos)/level.cellSize).toInt, floor(floor(yPos)/level.cellSize).toInt)
         debugPrint( xPos + ", " + yPos + " " + (xCell, yCell) )
         if( xCell >= level.widthCells || xCell < 0 || yCell >= level.heightCells || yCell < 0 ) {
-        	(xPos, yPos, level.wallTexture, Position(xPos, yPos) :: positions)
+        	(xPos, yPos, level.wallTexture, Position(xPos.toInt, yPos.toInt) :: positions)
         } else if(level(xCell, yCell).isDefined) {
-        	(xPos, yPos, level(xCell, yCell).get, Position(xPos, yPos) :: positions)
+        	(xPos, yPos, level(xCell, yCell).get, Position(xPos.toInt, yPos.toInt) :: positions)
         } else {
-        	castRayInternal(xPos + xStep, yPos + yStep, Position(xPos, yPos) :: positions)
+        	castRayInternal(xPos + xStep, yPos + yStep, Position(xPos.toInt, yPos.toInt) :: positions)
         }
       }
       
@@ -99,6 +107,9 @@ object RayCaster {
     private[this] var lastDebugInfo : DebugInfo = null
     
     def debugInfo : DebugInfo = lastDebugInfo
+    
+    val EPSILON = .00001
+
     
     def render(pos : Position, angle : Double) : BufferedImage = {
       /*
@@ -123,35 +134,38 @@ object RayCaster {
         
         // Cast ray that hits virticle walls
         val vRayTan = abs(tan(rayAngle))*yDirection
-        val vRayXStep : Int = level.cellSize*xDirection
-        val vRayYStep : Int = (level.cellSize * vRayTan).toInt
-        val vRayXPos:Int = xDirection match {
-          case -1 => ((xPos / level.cellSize) * level.cellSize) - 1
-          case 0 => 0
-          case 1 => ((xPos / level.cellSize) * level.cellSize) + 65
+        val vRayXStep = level.cellSize*xDirection
+        val vRayYStep = level.cellSize * vRayTan
+        val vRayXPos = xDirection match {
+          case -1 => ((xPos / level.cellSize) * level.cellSize) - EPSILON
+          case 0 => 0.
+          case 1 => ((xPos / level.cellSize) * level.cellSize) + level.cellSize + EPSILON
         }
-        val vRayYPos:Int = yPos + ( abs(xPos - vRayXPos) * vRayTan ).toInt
+        val vRayYPos = yPos + abs(xPos - vRayXPos) * vRayTan
         debugPrint("V xStep " + vRayXStep + " yStep " + vRayYStep + " x " + vRayXPos + " y " + vRayYPos)
         val (vRayX, vRayY, vRayTex, vPoses) = castRay(vRayXPos, vRayYPos, vRayXStep, vRayYStep)
         val vRayDist = hypot(vRayX-xPos, vRayY-yPos)
 
         // Cast ray that hits horiz. walls
         val hRayTan = abs(tan(rayAngle))*xDirection
-        val hRayXStep : Int = (level.cellSize / hRayTan).toInt
-        val hRayYStep : Int = level.cellSize * yDirection
-        val hRayYPos:Int = yDirection match {
-          case -1 => ((yPos / level.cellSize) * level.cellSize) - 1
-          case 0 => 0
-          case 1 => ((yPos / level.cellSize) * level.cellSize) + 65
+        val hRayXStep = level.cellSize / hRayTan
+        val hRayYStep = level.cellSize * yDirection
+        val hRayYPos = yDirection match {
+          case -1 => ((yPos / level.cellSize) * level.cellSize) - EPSILON
+          case 0 => 0.
+          case 1 => ((yPos / level.cellSize) * level.cellSize) + level.cellSize + EPSILON
         }
-        val hRayXPos:Int = xPos + ( abs(yPos - hRayYPos) / hRayTan ).toInt 
+        val hRayXPos = xPos + abs(yPos - hRayYPos) / hRayTan 
         debugPrint("H xStep " + hRayXStep + " yStep " + hRayYStep + " x " + hRayXPos + " y " + hRayYPos)
         val (hRayX, hRayY, hRayTex, hPoses) = castRay(hRayXPos, hRayYPos, hRayXStep, hRayYStep)
         val hRayDist = hypot(hRayX-xPos, hRayY-yPos)
 
         //*cos(angleOffCenter)
-        val (retX, retY) = if( hRayDist < vRayDist ) (hRayDist*cos(angleOffCenter), hRayTex) else (vRayDist*cos(angleOffCenter), vRayTex)
-        (retX, retY, RayInfo(rayAngle, vPoses.reverse, hPoses.reverse))
+        val (retDist, retTexture) = if( hRayDist < vRayDist ) 
+        			(hRayDist*cos(angleOffCenter), hRayTex.shade(0.6)) 
+        		  else 
+        			(vRayDist*cos(angleOffCenter), vRayTex.shade(if(xDirection>0) 1 else 0.9))
+        (retDist, retTexture, RayInfo(rayAngle, vPoses.reverse, hPoses.reverse))
       }
       
       lastDebugInfo = DebugInfo(pos, angle, (for( (_, _, ray)<- columns ) yield ray).toList)
@@ -163,10 +177,10 @@ object RayCaster {
       g.setStroke(new BasicStroke())
       for( ((dist, tex, _), i) <- columns.toList.zipWithIndex ) {
         val l = (level.cellSize.toDouble/dist * projectionPlaneDistance).toInt
-        tex match {
-          case Color(r,gr,b) => g.setColor(new java.awt.Color(r.toFloat,gr.toFloat,b.toFloat, 1.0f))
-          case _ => g.setColor(java.awt.Color.WHITE)
-        }
+        g.setColor(tex match {
+          case Color(r,gr,b) => new java.awt.Color(r.toFloat,gr.toFloat,b.toFloat, 1.0f)
+          case _ => java.awt.Color.WHITE
+        })
         debugPrint(l + " " + ((dist, tex), i) + " " + g.getColor + " " + (outHeight/2 - l/2, outHeight/2 + l/2))
         g.drawLine(i, outHeight/2 - l/2, i, outHeight/2 + l/2)
       }
