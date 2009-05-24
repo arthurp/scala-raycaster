@@ -24,6 +24,28 @@ object RayCaster {
     
     var cellSize : Int = 64
     var wallTexture : Texture = Color(1,1,1)
+    
+    class LevelFiller(b:LevelBuilder, x:Int, y:Int) {
+      def |(tex : Texture) : LevelFiller = {
+        b(x,y) = tex
+        new LevelFiller(b, x+1, y)
+      }
+      def |(i : Int) : LevelFiller = {
+        new LevelFiller(b, x+1, y)
+      }
+      def |/(tex : Texture) : LevelFiller = {
+        b(x,y) = tex
+        new LevelFiller(b, 0, y+1)
+      }
+      def |/(i : Int) : LevelFiller = {
+        new LevelFiller(b, 0, y+1)
+      }
+    }
+    
+    def <<(tex : Texture) : LevelFiller = {
+      this(0,0) = tex
+      new LevelFiller(this, 1, 0)
+    }
   }
   
   final class Level( private[this] val levelBuilder : LevelBuilder ) {
@@ -53,20 +75,25 @@ object RayCaster {
   class Renderer(val level : Level, val fov:Double, val projectionPlaneDistance :Int, val outWidth:Int, val outHeight:Int) {
     import java.lang.Math._
       
-    private[this] def castRay(xPos:Int, yPos:Int, xStep:Int, yStep:Int) : (Double, Texture, List[Position]) = {
+    private[this] def castRay(xPos:Int, yPos:Int, xStep:Int, yStep:Int) : (Int, Int, Texture, List[Position]) = {
       def castRayInternal(xPos:Int, yPos:Int, positions: List[Position]) : (Int, Int, Texture, List[Position]) = {
-        val (xCell, yCell) = (xPos/level.cellSize, yPos/level.cellSize)
-        println( xPos + ", " + yPos + " " + (xCell, yCell) )
+        val (xCell, yCell) = (floor(xPos.toFloat/level.cellSize).toInt, floor(yPos.toFloat/level.cellSize).toInt)
+        debugPrint( xPos + ", " + yPos + " " + (xCell, yCell) )
         if( xCell >= level.widthCells || xCell < 0 || yCell >= level.heightCells || yCell < 0 ) {
-        	(xPos, yPos, level.wallTexture, positions)
+        	(xPos, yPos, level.wallTexture, Position(xPos, yPos) :: positions)
         } else if(level(xCell, yCell).isDefined) {
-        	(xPos, yPos, level(xCell, yCell).get, positions)
+        	(xPos, yPos, level(xCell, yCell).get, Position(xPos, yPos) :: positions)
         } else {
         	castRayInternal(xPos + xStep, yPos + yStep, Position(xPos, yPos) :: positions)
         }
       }
-      val (finalXPos, finalYPos, tex, poses) = castRayInternal(xPos, yPos, List())
-      (hypot(finalXPos-xPos,finalYPos-yStep), tex, poses)
+      
+      if( xStep == 0 && yStep == 0 ) {
+        (Math.MAX_INT, Math.MAX_INT, level.wallTexture, Nil)
+      } else {
+    	  castRayInternal(xPos, yPos, List())
+    	  //(finalXPos,finalYPos, tex, poses)
+      }
     }
     
     private[this] var lastDebugInfo : DebugInfo = null
@@ -75,49 +102,56 @@ object RayCaster {
     
     def render(pos : Position, angle : Double) : BufferedImage = {
       /*
-       * Theta = 0 straight down, angle increases counter clockwise
+       * Theta = 0 due right, angle increases clockwise
        * Y increases down
        * X increases right
        */
       
-      println( pos + " angle " + toDegrees(angle) )
+      debugPrint( pos + " angle " + toDegrees(angle) )
         
       val columns = for( colNum <- (-outWidth/2) until (outWidth/2) ) yield {
         val angleOffCenter = fov/outWidth * colNum
         val rayAngle = normalizeAngle(angle + angleOffCenter)
-        val xDirection = if( rayAngle > 0 ) 1 else if(rayAngle < 0) -1 else 0
-        val yDirection = if( abs(rayAngle) > PI/2 ) -1 else if(abs(rayAngle) < PI/2) 1 else 0
+        val yDirection = if( rayAngle > 0 ) 1 else if(rayAngle < 0) -1 else 0
+        val xDirection = if( abs(rayAngle) > PI/2 ) -1 else if(abs(rayAngle) < PI/2) 1 else 0
         
         val Position(xPos, yPos) = pos
         
-        println( pos + " angle " + toDegrees(rayAngle) + " Directions " + xDirection + ", " + yDirection )
+        debugPrint( pos + " angle " + toDegrees(rayAngle) + " Directions " + xDirection + ", " + yDirection )
+
+        val tanRayAng = tan(rayAngle)
         
         // Cast ray that hits virticle walls
+        val vRayTan = abs(tan(rayAngle))*yDirection
         val vRayXStep : Int = level.cellSize*xDirection
-        val vRayYStep : Int = (level.cellSize / tan(rayAngle)).toInt
+        val vRayYStep : Int = (level.cellSize * vRayTan).toInt
         val vRayXPos:Int = xDirection match {
           case -1 => ((xPos / level.cellSize) * level.cellSize) - 1
           case 0 => 0
-          case 1 => ((xPos / level.cellSize) * level.cellSize) + 64
+          case 1 => ((xPos / level.cellSize) * level.cellSize) + 65
         }
-        val vRayYPos:Int = yPos + ( abs(xPos - vRayXPos) / tan(rayAngle) ).toInt * yDirection
-        println("V xStep " + vRayXStep + " yStep " + vRayYStep + " x " + vRayXPos + " y " + vRayYPos)
-        val (vRayDist, vRayTex, vPoses) = castRay(vRayXPos, vRayYPos, vRayXStep, vRayYStep)
+        val vRayYPos:Int = yPos + ( abs(xPos - vRayXPos) * vRayTan ).toInt
+        debugPrint("V xStep " + vRayXStep + " yStep " + vRayYStep + " x " + vRayXPos + " y " + vRayYPos)
+        val (vRayX, vRayY, vRayTex, vPoses) = castRay(vRayXPos, vRayYPos, vRayXStep, vRayYStep)
+        val vRayDist = hypot(vRayX-xPos, vRayY-yPos)
 
         // Cast ray that hits horiz. walls
-        val hRayXStep : Int = (tan(rayAngle) * level.cellSize).toInt
+        val hRayTan = abs(tan(rayAngle))*xDirection
+        val hRayXStep : Int = (level.cellSize / hRayTan).toInt
         val hRayYStep : Int = level.cellSize * yDirection
         val hRayYPos:Int = yDirection match {
-          case -1 => ((xPos / level.cellSize) * level.cellSize) - 1
+          case -1 => ((yPos / level.cellSize) * level.cellSize) - 1
           case 0 => 0
-          case 1 => ((xPos / level.cellSize) * level.cellSize) + 64
+          case 1 => ((yPos / level.cellSize) * level.cellSize) + 65
         }
-        val hRayXPos:Int = xPos + ( abs(yPos - hRayYPos) * tan(rayAngle) ).toInt * xDirection 
-        println("H xStep " + hRayXStep + " yStep " + hRayYStep + " x " + hRayXPos + " y " + hRayYPos)
-        val (hRayDist, hRayTex, hPoses) = castRay(hRayXPos, hRayYPos, hRayXStep, hRayYStep)
+        val hRayXPos:Int = xPos + ( abs(yPos - hRayYPos) / hRayTan ).toInt 
+        debugPrint("H xStep " + hRayXStep + " yStep " + hRayYStep + " x " + hRayXPos + " y " + hRayYPos)
+        val (hRayX, hRayY, hRayTex, hPoses) = castRay(hRayXPos, hRayYPos, hRayXStep, hRayYStep)
+        val hRayDist = hypot(hRayX-xPos, hRayY-yPos)
 
-        val ret = if( hRayDist < vRayDist ) (hRayDist*cos(angleOffCenter), hRayTex) else (vRayDist*cos(angleOffCenter), vRayTex)
-        (ret._1, ret._2, RayInfo(rayAngle, vPoses, hPoses))
+        //*cos(angleOffCenter)
+        val (retX, retY) = if( hRayDist < vRayDist ) (hRayDist*cos(angleOffCenter), hRayTex) else (vRayDist*cos(angleOffCenter), vRayTex)
+        (retX, retY, RayInfo(rayAngle, vPoses.reverse, hPoses.reverse))
       }
       
       lastDebugInfo = DebugInfo(pos, angle, (for( (_, _, ray)<- columns ) yield ray).toList)
@@ -133,7 +167,7 @@ object RayCaster {
           case Color(r,gr,b) => g.setColor(new java.awt.Color(r.toFloat,gr.toFloat,b.toFloat, 1.0f))
           case _ => g.setColor(java.awt.Color.WHITE)
         }
-        //println(l + " " + ((dist, tex), i) + " " + g.getColor + " " + (outHeight/2 - l/2, outHeight/2 + l/2))
+        debugPrint(l + " " + ((dist, tex), i) + " " + g.getColor + " " + (outHeight/2 - l/2, outHeight/2 + l/2))
         g.drawLine(i, outHeight/2 - l/2, i, outHeight/2 + l/2)
       }
       img
@@ -141,4 +175,6 @@ object RayCaster {
     
     def normalizeAngle(th:Double) : Double = if(th > PI) normalizeAngle(th - PI*2) else if(th < -PI) normalizeAngle(th + PI*2) else th  
   }
+  
+  private[this] def debugPrint( str : => String ) {}
 }
